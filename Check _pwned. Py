@@ -1,0 +1,59 @@
+# check_pwned.py
+# فحص كلمة مرور باستخدام Have I Been Pwned Pwned Passwords (range API)
+# لا يرسل البرنامج كلمة المرور النصية أبداً، بل يرسل أول 5 أحرف من SHA-1 hash فقط.
+
+import hashlib
+import requests
+
+def sha1_upper(s: str) -> str:
+    """إرجاع SHA-1 هكس (أحرف كبيرة) لسلسلة نصية."""
+    return hashlib.sha1(s.encode('utf-8')).hexdigest().upper()
+
+def query_hibp_range(prefix5: str) -> str:
+    """طلب قائمة السيوفيكس (suffixes) من HIBP بناءً على أول 5 أحرف من الهَش."""
+    url = f"https://api.pwnedpasswords.com/range/{prefix5}"
+    # لا حاجة لمفتاح API لهذه الواجهة. لكن احترم حدود السرعة إذا كنت تجري اختبارات متكررة.
+    resp = requests.get(url)
+    resp.raise_for_status()
+    return resp.text
+
+def get_breach_count(password: str) -> int:
+    """إرجاع عدد المرات التي ظهرت فيها كلمة المرور في قواعد البيانات المسرّبة (0 إن لم توجد)."""
+    sha1 = sha1_upper(password)
+    prefix5, suffix = sha1[:5], sha1[5:]
+    data = query_hibp_range(prefix5)
+    # نص الرد يحتوي على أسطر بالشكل: SUFFIX:COUNT
+    for line in data.splitlines():
+        if ':' not in line:
+            continue
+        suf, count = line.split(':')
+        # الرد يستخدم أحرف كبيرة في الهكس؛ نقارن مباشرة
+        if suf.strip().upper() == suffix:
+            try:
+                return int(count.strip())
+            except ValueError:
+                return 0
+    return 0
+
+def main():
+    print("فحص كلمة مرور باستخدام Have I Been Pwned (k-Anonymity).")
+    pw = input("أدخل كلمة المرور للفحص (لن تُرسل النصية كاملة): ").strip()
+    if not pw:
+        print("لم تدخل أي كلمة مرور. الخروج.")
+        return
+    try:
+        count = get_breach_count(pw)
+    except requests.HTTPError as e:
+        print("خطأ أثناء التواصل مع خدمة HIBP:", e)
+        return
+    except requests.RequestException as e:
+        print("مشكلة شبكة:", e)
+        return
+    if count == 0:
+        print("✅ كلمة المرور **لم يتم العثور عليها** في قواعد البيانات المسرّبة (على الأقل بحسب HIBP).")
+    else:
+        print(f"⚠️ كلمة المرور **مسرّبة!** ظهرت {count} مرة/مرات في قواعد البيانات المسرّبة.")
+        print("ننصح بتغييرها فوراً واستعمال كلمة مرور قوية وفريدة وادارة كلمات المرور.")
+
+if __name__ == "__main__":
+    main()
